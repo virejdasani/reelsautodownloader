@@ -1,0 +1,34 @@
+niches:
+- name: GTA 6
+  keywords:
+  - gta6
+  - gtavi
+  - rockstargames
+  min_views: 500000
+  max_results: 10
+  exclude_words:
+  - leak
+  - rumor
+  - fake
+  include_words: []
+  sort_by: views
+  enabled: true
+- name: Gaming News
+  keywords:
+  - gaming
+  - gameupdate
+  - esports
+  min_views: 200000
+  max_results: 8
+  exclude_words: []
+  include_words: []
+  sort_by: views
+  enabled: true
+output_dir: downloads
+metadata_dir: output
+max_concurrent_downloads: 3
+skip_downloaded: true
+save_captions: true
+save_thumbnails: true
+video_format: mp4
+max_video_height: 1080
