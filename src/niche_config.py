@@ -1,8 +1,5 @@
 """
 Niche configuration for the Instagram Reels downloader bot.
-
-Defines what niches to search for, which hashtags/keywords to use,
-and ranking preferences (min views, engagement thresholds, etc.).
 """
 
 from __future__ import annotations
@@ -20,28 +17,14 @@ class NicheConfig:
     """Configuration for a single content niche."""
 
     name: str
-    """Human-readable name, e.g. 'GTA 6'."""
-
     keywords: list[str] = field(default_factory=list)
-    """Search keywords / hashtags to query, e.g. ['gta6', 'gtavi']."""
-
     min_views: int = 100_000
-    """Minimum view count for a reel to be considered 'viral'."""
-
+    max_duration: int = 60  # NEW: Max duration in seconds
     max_results: int = 10
-    """Maximum number of reels to download per run."""
-
     exclude_words: list[str] = field(default_factory=list)
-    """Words that disqualify a reel (e.g. ['fake', 'leak'])."""
-
     include_words: list[str] = field(default_factory=list)
-    """If non-empty, caption must contain at least one of these."""
-
     sort_by: str = "views"
-    """Sort key: 'views', 'likes', 'comments', 'engagement'."""
-
     enabled: bool = True
-    """Set to False to skip this niche."""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -101,16 +84,10 @@ def create_default_config(path: str | Path) -> BotConfig:
         niches=[
             NicheConfig(
                 name="GTA 6",
-                keywords=["gta6", "gtavi", "rockstargames"],
+                keywords=["gta6", "gtavi"],
                 min_views=500_000,
+                max_duration=15, # Example
                 max_results=10,
-                exclude_words=["leak", "rumor", "fake"],
-            ),
-            NicheConfig(
-                name="Gaming News",
-                keywords=["gaming", "gameupdate", "esports"],
-                min_views=200_000,
-                max_results=8,
             ),
         ]
     )

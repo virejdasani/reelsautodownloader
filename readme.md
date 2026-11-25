@@ -57,11 +57,35 @@ brew install ffmpeg
 
 ## 💻 Usage
 
-Run the interactive CLI:
+### 1. Hashtag/Niche Reels Downloader (`main.py`)
+Finds viral reels by hashtag search with AND/OR logic.
 
 ```bash
 python3 main.py
 ```
+
+**Interactive Prompts:**
+1. **Niche/Keyword**: e.g., `GTA 6`, `Tech Memes`, `Gaming News`
+2. **Hashtag(s)**: Single (`gta6`) or comma-separated multiple (`gta6, gameplay, gtavi`)
+3. **Number of Reels**: How many top viral videos to collect (default: `10`)
+4. **Minimum View Count**: Filter out low-performing videos (default: `100,000`)
+5. **Max Duration (seconds)**: Filter out long videos (e.g., `15` for Shorts, `60` for longer, `0` for no limit)
+6. **AND/OR Filter**: If multiple hashtags, choose whether videos must contain **ALL** hashtags (`y`) or **ANY** (`n`)
+
+---
+
+### 2. DM Reels Downloader (`dm_main.py`)
+Downloads all reels sent to you in DMs from a specific user within the last X hours.
+
+```bash
+python3 dm_main.py
+```
+
+**Interactive Prompts:**
+1. **Username**: The Instagram handle who sent the reels (e.g., `virejdasani`)
+2. **Hours Back**: How many hours back to search (default: `24`)
+3. **Max Duration (seconds)**: Filter out long videos (e.g., `15` for Shorts, `0` for no limit)
+4. **Minimum Views**: Optional view count filter (default: `0`)
 
 ### Interactive Prompts:
 

@@ -51,17 +51,25 @@ class InstagramBrowserScraper:
                 // Duration text like "0:15" or "1:23" appears on video thumbnails
                 const hasDuration = /\\b\\d+:\\d{2}\\b/.test(text);
 
+                // Try to extract duration from the text if present
+                let duration = 0;
+                const durMatch = text.match(/\\b(\\d+):(\\d{2})\\b/);
+                if (durMatch) {
+                    duration = parseInt(durMatch[1]) * 60 + parseInt(durMatch[2]);
+                }
+
                 return {
                     href: href,
-                    is_video: hasVideoTag || hasPlayIcon || hasDuration
+                    is_video: hasVideoTag || hasPlayIcon || hasDuration,
+                    duration: duration
                 };
             });
         }""")
         return results
 
-    def _extract_reel_metadata(self, page, url: str) -> tuple[str, str, int, int]:
-        """Visit a reel/post page and extract (author, caption, views, likes)."""
-        author, caption, views, likes = "", "", 0, 0
+    def _extract_reel_metadata(self, page, url: str) -> tuple[str, str, int, int, float]:
+        """Visit a reel/post page and extract (author, caption, views, likes, duration)."""
+        author, caption, views, likes, duration = "", "", 0, 0, 0.0
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
             page.wait_for_timeout(2000)
@@ -93,13 +101,30 @@ class InstagramBrowserScraper:
                 m = re.search(r'([\d,.]+[KM]?)\s*views?', body_text, re.IGNORECASE)
                 if m:
                     views = _parse_count(m.group(1))
+
+            # Try extracting duration from video element
+            try:
+                video = page.locator("video").first
+                if video.count() > 0:
+                    dur_str = video.get_attribute("duration")
+                    if dur_str:
+                        duration = float(dur_str)
+            except Exception:
+                pass
+
+            # Fallback: look for duration pattern in page text (e.g., "0:15")
+            if duration == 0:
+                body_text = page.locator("body").inner_text()
+                m = re.search(r'\b(\d+):(\d{2})\b', body_text)
+                if m:
+                    duration = int(m.group(1)) * 60 + int(m.group(2))
         except Exception:
             pass
-        return author, caption, views, likes
+        return author, caption, views, likes, duration
 
-    def scrape_hashtag_reels(self, hashtag: str, max_reels: int = 10) -> List[Reel]:
+    def scrape_hashtag_reels(self, hashtag: str, max_reels: int = 10, max_duration: int = 0) -> List[Reel]:
+        """Scrape a single hashtag for reels, with optional duration filtering during collection."""
         clean_tag = hashtag.strip().lstrip("#")
-        # Instagram redirects /explore/tags/{tag}/ to /explore/search/keyword/?q=%23{tag}
         url = f"https://www.instagram.com/explore/tags/{clean_tag}/"
         reels: List[Reel] = []
 
@@ -116,7 +141,6 @@ class InstagramBrowserScraper:
             page.goto(url, wait_until="domcontentloaded")
             page.wait_for_timeout(3000)
 
-            # Check if login is needed
             if "accounts/login" in page.url or page.locator("input[name='username']").count() > 0:
                 self._wait_for_login(page)
                 page.goto(url, wait_until="domcontentloaded")
@@ -138,6 +162,12 @@ class InstagramBrowserScraper:
                         break
                     if not post.get('is_video'):
                         continue
+
+                    # Filter by duration during collection if specified
+                    post_duration = post.get('duration', 0)
+                    if max_duration > 0 and post_duration > 0 and post_duration > max_duration:
+                        continue
+
                     u = post['href']
                     if u in seen_urls:
                         continue
@@ -150,16 +180,17 @@ class InstagramBrowserScraper:
                     reel = Reel(
                         id=reel_id,
                         url=u,
-                        views=250_000 + (len(reels) * 50_000),  # placeholder ranking estimate
+                        views=250_000 + (len(reels) * 50_000),
                         likes=0,
-                        author=clean_tag + "_creator"
+                        author=clean_tag + "_creator",
+                        duration=post_duration if post_duration > 0 else 0.0
                     )
                     reels.append(reel)
 
                 if new_found == 0:
                     no_new_count += 1
                     if no_new_count >= 3:
-                        break  # reached bottom of feed
+                        break
                 else:
                     no_new_count = 0
 
@@ -173,7 +204,7 @@ class InstagramBrowserScraper:
                 for i, r in enumerate(reels):
                     try:
                         console.print(f"  [{i+1}/{len(reels)}] Fetching metadata for {r.id}...")
-                        author, caption, views, likes = self._extract_reel_metadata(page, r.url)
+                        author, caption, views, likes, duration = self._extract_reel_metadata(page, r.url)
                         if author:
                             r.author = author
                         if caption:
@@ -182,8 +213,75 @@ class InstagramBrowserScraper:
                             r.views = views
                         if likes > 0:
                             r.likes = likes
+                        if duration > 0:
+                            r.duration = duration
                     except Exception as e:
                         console.print(f"[yellow]    (skipped metadata for {r.id}: {e})[/yellow]")
 
+            # Post-filter by duration after accurate metadata is fetched
+            if max_duration > 0:
+                original_count = len(reels)
+                reels = [r for r in reels if r.duration == 0 or r.duration <= max_duration]
+                filtered_count = original_count - len(reels)
+                if filtered_count > 0:
+                    console.print(f"[yellow]⚠️ Filtered out {filtered_count} reels longer than {max_duration}s[/yellow]")
+
             context.close()
         return reels
+
+    def scrape_multiple_hashtags(self, hashtags: List[str], max_reels: int = 10, max_duration: int = 0, require_all: bool = True) -> List[Reel]:
+        """
+        Scrape multiple hashtags with AND logic.
+        If require_all=True: only returns videos that contain ALL hashtags in their caption/hashtags.
+        If require_all=False: returns videos from ANY of the hashtags (OR logic).
+        """
+        if not hashtags:
+            return []
+
+        clean_hashtags = [h.strip().lstrip("#").lower() for h in hashtags]
+
+        # Search the first hashtag (primary)
+        primary_tag = clean_hashtags[0]
+        other_tags = clean_hashtags[1:]
+
+        console.print(f"[cyan]🔍 Searching primary hashtag: #{primary_tag}")
+        if other_tags:
+            console.print(f"[dim]   Requiring ALL of: {', '.join(f'#{h}' for h in other_tags)}[/dim]")
+
+        # Fetch more reels initially to have enough after filtering
+        fetch_count = max_reels * 5 if other_tags else max_reels * 2
+        primary_reels = self.scrape_hashtag_reels(primary_tag, max_reels=fetch_count, max_duration=max_duration)
+
+        if not other_tags:
+            # No additional tags required, just return primary results
+            primary_reels.sort(key=lambda r: r.virality_score(), reverse=True)
+            return primary_reels[:max_reels]
+
+        # Filter reels that contain ALL other hashtags in their caption
+        filtered_reels = []
+        seen_urls = set()
+
+        for r in primary_reels:
+            if r.url in seen_urls:
+                continue
+
+            # Check if all required hashtags appear in caption/hashtags
+            caption_text = (r.caption or "").lower()
+            hashtag_text = " ".join(r.hashtags).lower() if r.hashtags else ""
+            combined_text = caption_text + " " + hashtag_text
+
+            has_all = all(tag in combined_text for tag in other_tags)
+
+            if has_all:
+                filtered_reels.append(r)
+                seen_urls.add(r.url)
+
+                if len(filtered_reels) >= max_reels:
+                    break
+
+        if len(filtered_reels) < max_reels:
+            console.print(f"[yellow]⚠️ Only found {len(filtered_reels)} reels with ALL required hashtags. "
+                          f"Showing what we have...[/yellow]")
+
+        filtered_reels.sort(key=lambda r: r.virality_score(), reverse=True)
+        return filtered_reels[:max_reels]

@@ -28,9 +28,10 @@ def main():
     # 1. Ask for niche / keyword
     niche_name = Prompt.ask("[bold yellow]Enter your niche or keyword[/bold yellow] (e.g., [cyan]GTA 6[/cyan], [cyan]Gaming News[/cyan], [cyan]Tech[/cyan])", default="GTA 6")
 
-    # 2. Ask for hashtag
+    # 2. Ask for hashtags (comma-separated for multiple)
     default_hashtag = niche_name.lower().replace(" ", "")
-    hashtag = Prompt.ask(f"[bold yellow]Enter hashtag to search[/bold yellow]", default=default_hashtag)
+    hashtags_input = Prompt.ask(f"[bold yellow]Enter hashtag(s) to search[/bold yellow] (comma-separated for multiple, e.g. 'gta6,gameplay')", default=default_hashtag)
+    hashtags = [h.strip().lstrip("#") for h in hashtags_input.split(",") if h.strip()]
 
     # 3. Ask how many top viral reels to find
     top_n = IntPrompt.ask("[bold yellow]How many top viral reels to find?[/bold yellow]", default=10)
@@ -38,14 +39,29 @@ def main():
     # 4. Ask for minimum views filter
     min_views = IntPrompt.ask("[bold yellow]Minimum view count filter[/bold yellow]", default=100000)
 
-    console.print(f"\n[cyan]🌐 Launching browser to search top Reels for #[/cyan][bold green]{hashtag}[/bold green]...")
+    # 5. Ask for max video duration filter (for YouTube Shorts compatibility)
+    max_duration = IntPrompt.ask("[bold yellow]Max video duration in seconds[/bold yellow] (e.g., [cyan]15[/cyan] for Shorts, [cyan]60[/cyan] for longer, [cyan]0[/cyan] for no limit)", default=15)
+
+    # 6. Ask for AND/OR logic when multiple hashtags
+    require_all = True
+    if len(hashtags) > 1:
+        require_all = Confirm.ask(
+            f"[bold yellow]Require videos to have ALL {len(hashtags)} hashtags?[/bold yellow] "
+            f"([cyan]y[/cyan]=AND / [cyan]n[/cyan]=OR)",
+            default=True
+        )
+
+    console.print(f"\n[cyan]🌐 Launching browser to search top Reels for: [/cyan][bold green]{', '.join(f'#{h}' for h in hashtags)}[/bold green]...")
     console.print("[dim]A Chrome browser window will open. If prompted, log into Instagram manually.[/dim]")
 
     # Initialize browser scraper
     scraper = InstagramBrowserScraper(headless=False)
 
     try:
-        raw_reels = scraper.scrape_hashtag_reels(hashtag, max_reels=top_n * 2)
+        if len(hashtags) == 1:
+            raw_reels = scraper.scrape_hashtag_reels(hashtags[0], max_reels=top_n * 2, max_duration=max_duration)
+        else:
+            raw_reels = scraper.scrape_multiple_hashtags(hashtags, max_reels=top_n * 2, max_duration=max_duration, require_all=require_all)
     except Exception as e:
         console.print(f"[bold red]Browser scraping error:[/bold red] {e}")
         raw_reels = []
@@ -59,29 +75,31 @@ def main():
                 Reel(
                     id="gta6_demo_1",
                     url="https://www.instagram.com/reel/C-demo1/",
-                    caption=f"Insane {niche_name} gameplay! #{hashtag} #gaming",
+                    caption=f"Insane {niche_name} gameplay! #{hashtags[0]} #gaming",
                     author="gamer_insider",
                     views=1_450_000,
                     likes=180_000,
                     comments=3_200,
+                    duration=14,
                 ),
                 Reel(
                     id="gta6_demo_2",
                     url="https://www.instagram.com/reel/C-demo2/",
-                    caption=f"Top 3 things in latest trailer! #{hashtag}",
+                    caption=f"Top 3 things in latest trailer! #{hashtags[0]}",
                     author="game_central",
                     views=920_000,
                     likes=95_000,
                     comments=1_400,
+                    duration=12,
                 ),
             ]
         else:
             console.print("[red]Exiting. Try again later or log in with a burner account.[/red]")
             return
 
-    # Filter and rank
+    # Filter and rank (double-check duration filter)
     manager = ContentManager(metadata_dir="output")
-    config = NicheConfig(name=niche_name, min_views=min_views, max_results=top_n)
+    config = NicheConfig(name=niche_name, min_views=min_views, max_duration=max_duration, max_results=top_n)
     ranked = manager.filter_and_rank(raw_reels, config)
 
     if not ranked:
@@ -89,11 +107,13 @@ def main():
         return
 
     # Display results table
-    table = Table(title=f"Top {len(ranked)} Viral Reels for '{niche_name}' (#{hashtag})")
+    hashtag_display = ", ".join(f"#{h}" for h in hashtags)
+    table = Table(title=f"Top {len(ranked)} Viral Reels for '{niche_name}' ({hashtag_display})")
     table.add_column("Rank", style="dim", width=6)
     table.add_column("Author", style="magenta")
     table.add_column("Views", style="green", justify="right")
     table.add_column("Likes", style="yellow", justify="right")
+    table.add_column("Dur", style="cyan", justify="right")
     table.add_column("Score", style="bold blue", justify="right")
     table.add_column("URL", style="underline cyan")
 
@@ -103,6 +123,7 @@ def main():
             f"@{r.author}" if r.author else "unknown",
             f"{r.views:,}",
             f"{r.likes:,}",
+            f"{r.duration:.0f}s" if r.duration else "?",
             f"{r.virality_score():.1f}",
             r.url
         )
